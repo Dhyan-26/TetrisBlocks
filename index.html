@@ -1,0 +1,453 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Optimal Block Packing</title>
+        <!-- Tailwind CSS from CDN -->
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+        <style>
+            body {
+                font-family: 'Inter', sans-serif;
+            }
+            canvas {
+                border-radius: 0.75rem;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1-px rgba(0, 0, 0, 0.06);
+                background-color: #e5e7eb;
+            }
+        </style>
+    </head>
+    <body class="bg-gray-100 p-8 flex items-center justify-center min-h-screen">
+        <div class="bg-white p-6 rounded-xl shadow-lg w-full max-w-4xl grid md:grid-cols-2 gap-8">
+
+            <!-- Controls Panel -->
+            <div class="flex flex-col space-y-4">
+                <h1 class="text-3xl font-bold text-gray-800 mb-2">Optimal Block Packing</h1>
+                <p class="text-gray-600 mb-4">Arrange blocks to minimize aspect ratio.</p>
+
+                <!-- Shape Selection -->
+                <div>
+                    <h2 class="text-xl font-semibold mb-2">Choose Blocks</h2>
+                    <div class="flex items-center space-x-4 mb-2">
+                        <input type="radio" id="predefined" name="shape-choice" value="predefined" checked
+                            class="form-radio text-indigo-600 h-4 w-4">
+                        <label for="predefined" class="text-gray-700">Predefined Shapes</label>
+                        <input type="radio" id="custom" name="shape-choice" value="custom"
+                            class="form-radio text-indigo-600 h-4 w-4">
+                        <label for="custom" class="text-gray-700">Custom Shapes</label>
+                    </div>
+
+                    <!-- Predefined Shape Selector -->
+                    <div id="predefined-input" class="space-y-2 mb-4">
+                        <div id="predefined-list" class="flex flex-wrap gap-4"></div>
+                        <div class="flex items-center space-x-2">
+                            <label for="predefined-select" class="text-gray-700">Add:</label>
+                            <select id="predefined-select" class="flex-grow p-2 rounded-md border border-gray-300">
+                            </select>
+                            <input type="number" id="predefined-copies" value="1" min="1" class="w-16 p-2 rounded-md border border-gray-300">
+                            <button id="add-predefined-btn" class="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition">Add</button>
+                        </div>
+                    </div>
+
+                    <!-- Custom Shape Input -->
+                    <div id="custom-input" class="space-y-2 hidden mb-4">
+                        <label for="custom-matrix" class="block text-gray-700 font-medium">Enter 0/1 Matrix (comma-separated rows):</label>
+                        <textarea id="custom-matrix" rows="4" class="w-full p-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"></textarea>
+                        <div class="flex items-center space-x-2">
+                            <label for="custom-copies" class="text-gray-700">Copies:</label>
+                            <input type="number" id="custom-copies" value="1" min="1" class="w-16 p-2 rounded-md border border-gray-300">
+                            <button id="add-custom-btn" class="px-4 py-2 bg-indigo-500 text-white rounded-md hover:bg-indigo-600 transition">Add</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Block List -->
+                <div id="block-list" class="space-y-2 p-4 bg-gray-50 rounded-lg">
+                    <h3 class="text-lg font-semibold">Selected Blocks</h3>
+                    <ul id="block-list-ul" class="list-disc pl-5 text-gray-700"></ul>
+                </div>
+
+                <!-- Controls and Status -->
+                <div class="flex flex-col space-y-4">
+                    <button id="solve-btn" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-md shadow-md hover:bg-indigo-700 transition">Solve</button>
+                    <div id="status-message" class="text-center font-medium text-gray-600"></div>
+                    <div class="space-y-2">
+                        <label for="speed-slider" class="text-gray-700 font-medium">Animation Speed</label>
+                        <input type="range" id="speed-slider" min="10" max="1000" value="200" class="w-full h-2 rounded-lg appearance-none bg-gray-300 cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualization Panel -->
+            <div class="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-xl shadow-inner">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800" id="canvas-title">Packing Visualization</h2>
+                <canvas id="packing-canvas" class="w-full h-auto max-w-xl"></canvas>
+                <div id="output-info" class="mt-4 text-center space-y-2"></div>
+                <button id="download-csv-btn" class="hidden mt-4 px-4 py-2 bg-gray-700 text-white rounded-md shadow-md hover:bg-gray-800 transition">Download CSV</button>
+            </div>
+        </div>
+
+        <script>
+            // --- Core Application Logic ---
+            const predefinedShapes = {
+                'I': [[1, 1, 1, 1]],
+                'O': [[1, 1], [1, 1]],
+                'L': [[1, 0], [1, 0], [1, 1]],
+                'T': [[1, 1, 1], [0, 1, 0]],
+                'S': [[0, 1, 1], [1, 1, 0]],
+                'Z': [[1, 1, 0], [0, 1, 1]]
+            };
+            let selectedBlocks = [];
+            let animationFrames = [];
+            let animationInterval;
+
+            const canvas = document.getElementById('packing-canvas');
+            const ctx = canvas.getContext('2d');
+            const statusMessage = document.getElementById('status-message');
+            const outputInfo = document.getElementById('output-info');
+            const downloadCsvBtn = document.getElementById('download-csv-btn');
+
+            // --- Helper Functions ---
+            function rotateBlock(block) {
+                if (!block || block.length === 0) return [];
+                const rows = block.length;
+                const cols = block[0].length;
+                const newBlock = new Array(cols).fill(0).map(() => new Array(rows).fill(0));
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        newBlock[c][rows - 1 - r] = block[r][c];
+                    }
+                }
+                return newBlock;
+            }
+
+            function getBlockOrientations(block) {
+                const orientations = [];
+                let currentBlock = block;
+                for (let i = 0; i < 4; i++) {
+                    const isNew = !orientations.some(o => JSON.stringify(o) === JSON.stringify(currentBlock));
+                    if (isNew) {
+                        orientations.push(JSON.parse(JSON.stringify(currentBlock)));
+                    }
+                    currentBlock = rotateBlock(currentBlock);
+                }
+                return orientations;
+            }
+
+            function canPlace(grid, block, row, col) {
+                if (!block || block.length === 0) return false;
+                const blockH = block.length;
+                const blockW = block[0].length;
+                const gridH = grid.length;
+                const gridW = grid[0].length;
+
+                if (row + blockH > gridH || col + blockW > gridW) {
+                    return false;
+                }
+
+                for (let r = 0; r < blockH; r++) {
+                    for (let c = 0; c < blockW; c++) {
+                        if (block[r][c] === 1 && grid[row + r][col + c] !== 0) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            function placeBlock(grid, block, row, col, blockId) {
+                const newGrid = JSON.parse(JSON.stringify(grid));
+                const blockH = block.length;
+                const blockW = block[0].length;
+                for (let r = 0; r < blockH; r++) {
+                    for (let c = 0; c < blockW; c++) {
+                        if (block[r][c] === 1) {
+                            newGrid[row + r][col + c] = blockId;
+                        }
+                    }
+                }
+                return newGrid;
+            }
+
+            function findFirstEmptyCell(grid) {
+                for (let r = 0; r < grid.length; r++) {
+                    for (let c = 0; c < grid[0].length; c++) {
+                        if (grid[r][c] === 0) {
+                            return { r, c };
+                        }
+                    }
+                }
+                return null;
+            }
+
+            // --- Backtracking Solver ---
+            function* _solvePackingRecursive(grid, blocksToPlace, blockId = 1) {
+                if (blocksToPlace.length === 0) {
+                    yield [grid]; // Solution found, return the path
+                    return;
+                }
+            
+                const nextPos = findFirstEmptyCell(grid);
+                if (!nextPos) {
+                    return; // Grid is full, but blocks remain. Dead end.
+                }
+            
+                const { r: row, c: col } = nextPos;
+                const blockOriginal = blocksToPlace[0];
+                const orientations = getBlockOrientations(blockOriginal);
+            
+                for (const orientation of orientations) {
+                    if (canPlace(grid, orientation, row, col)) {
+                        const newGrid = placeBlock(grid, orientation, row, col, blockId);
+                        const newBlocksLeft = blocksToPlace.slice(1);
+            
+                        const solutionPathGenerator = _solvePackingRecursive(newGrid, newBlocksLeft, blockId + 1);
+            
+                        for (const path of solutionPathGenerator) {
+                            yield [grid, ...path];
+                        }
+                    }
+                }
+            }
+            
+            // --- Main Functions ---
+            function findOptimalPacking(allBlocks) {
+                const totalArea = allBlocks.reduce((sum, block) => sum + block.flat().filter(cell => cell === 1).length, 0);
+                
+                const possibleDims = [];
+                for (let h = 1; h <= Math.sqrt(totalArea); h++) {
+                    if (totalArea % h === 0) {
+                        const w = totalArea / h;
+                        possibleDims.push({ h, w });
+                        if (h !== w) {
+                            possibleDims.push({ h: w, w: h });
+                        }
+                    }
+                }
+                possibleDims.sort((a, b) => Math.abs(a.h / a.w - 1) - Math.abs(b.h / b.w - 1));
+
+                for (const dims of possibleDims) {
+                    const { h, w } = dims;
+                    const initialGrid = new Array(h).fill(0).map(() => new Array(w).fill(0));
+                    
+                    statusMessage.textContent = `Trying dimensions: ${h}x${w}`;
+                    
+                    const solutionPaths = [..._solvePackingRecursive(initialGrid, allBlocks)];
+                    
+                    if (solutionPaths.length > 0) {
+                        const frames = solutionPaths[0]; // Take the first successful path
+                        const finalGrid = frames[frames.length - 1];
+                        const aspect_ratio = Math.max(h / w, w / h).toFixed(2);
+                        return { dims, ratio: aspect_ratio, finalGrid, frames };
+                    }
+                }
+                return null;
+            }
+
+            function drawGrid(grid, ctx, blockColors, dims) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const gridH = grid.length;
+                const gridW = grid[0].length;
+                const cellSize = Math.min(canvas.width / gridW, canvas.height / gridH);
+                
+                const offsetX = (canvas.width - gridW * cellSize) / 2;
+                const offsetY = (canvas.height - gridH * cellSize) / 2;
+
+                for (let r = 0; r < gridH; r++) {
+                    for (let c = 0; c < gridW; c++) {
+                        const blockId = grid[r][c];
+                        ctx.fillStyle = blockColors[blockId] || '#ffffff';
+                        ctx.fillRect(offsetX + c * cellSize, offsetY + r * cellSize, cellSize, cellSize);
+                    }
+                }
+
+                ctx.strokeStyle = '#bdbdbd';
+                ctx.lineWidth = 1;
+                for (let r = 0; r <= gridH; r++) {
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX, offsetY + r * cellSize);
+                    ctx.lineTo(offsetX + gridW * cellSize, offsetY + r * cellSize);
+                    ctx.stroke();
+                }
+                for (let c = 0; c <= gridW; c++) {
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX + c * cellSize, offsetY);
+                    ctx.lineTo(offsetX + c * cellSize, offsetY + gridH * cellSize);
+                    ctx.stroke();
+                }
+            }
+
+            let frameIndex = 0;
+            let lastTimestamp = 0;
+            let animationSpeed = 200;
+
+            function startAnimation(frames, dims, blockColors) {
+                frameIndex = 0;
+                lastTimestamp = 0;
+                
+                function animate(timestamp) {
+                    if (timestamp - lastTimestamp >= animationSpeed) {
+                        drawGrid(frames[frameIndex], ctx, blockColors, dims);
+                        frameIndex++;
+                        lastTimestamp = timestamp;
+                    }
+
+                    if (frameIndex < frames.length) {
+                        animationInterval = requestAnimationFrame(animate);
+                    } else {
+                        statusMessage.textContent = 'Animation finished!';
+                    }
+                }
+                animationInterval = requestAnimationFrame(animate);
+            }
+
+            function generateCSV(grid) {
+                const csvRows = grid.map(row => row.join(','));
+                return csvRows.join('\n');
+            }
+
+            // --- Event Handlers & Initialization ---
+            function clearCanvas() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                outputInfo.innerHTML = '';
+                downloadCsvBtn.classList.add('hidden');
+            }
+
+            function updateBlockList() {
+                const listUl = document.getElementById('block-list-ul');
+                listUl.innerHTML = '';
+                if (selectedBlocks.length === 0) {
+                    listUl.innerHTML = '<li class="text-gray-500">No blocks added yet.</li>';
+                    return;
+                }
+                selectedBlocks.forEach((block, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center';
+                    const displayText = `Block ${index + 1}: ${block.name || 'Custom'} (${block.copies} copies)`;
+                    li.innerHTML = `<span>${displayText}</span>`;
+                    const removeBtn = document.createElement('button');
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.className = 'ml-4 text-red-500 hover:text-red-700 transition';
+                    removeBtn.onclick = () => {
+                        selectedBlocks.splice(index, 1);
+                        updateBlockList();
+                    };
+                    li.appendChild(removeBtn);
+                    listUl.appendChild(li);
+                });
+            }
+
+            document.getElementById('add-predefined-btn').addEventListener('click', () => {
+                const select = document.getElementById('predefined-select');
+                const copies = parseInt(document.getElementById('predefined-copies').value);
+                const name = select.value;
+                const shape = predefinedShapes[name];
+                if (shape && copies > 0) {
+                    selectedBlocks.push({ name, copies, shape });
+                    updateBlockList();
+                }
+            });
+
+            document.getElementById('add-custom-btn').addEventListener('click', () => {
+                const matrixStr = document.getElementById('custom-matrix').value;
+                const copies = parseInt(document.getElementById('custom-copies').value);
+                if (matrixStr && copies > 0) {
+                    try {
+                        const shape = matrixStr.trim().split('\n').map(row => row.split(',').map(Number));
+                        if (shape.flat().some(val => val !== 0 && val !== 1)) {
+                            throw new Error('Invalid matrix format. Only 0s and 1s allowed.');
+                        }
+                        selectedBlocks.push({ name: 'Custom', copies, shape });
+                        updateBlockList();
+                    } catch (e) {
+                        statusMessage.textContent = 'Error: Invalid custom matrix format.';
+                    }
+                }
+            });
+
+            document.getElementById('solve-btn').addEventListener('click', () => {
+                if (selectedBlocks.length === 0) {
+                    statusMessage.textContent = 'Please add at least one block.';
+                    return;
+                }
+                if (animationInterval) cancelAnimationFrame(animationInterval);
+                clearCanvas();
+                statusMessage.textContent = 'Solving... Please wait.';
+
+                const allBlocks = selectedBlocks.flatMap(b => new Array(b.copies).fill(b.shape));
+
+                const solution = findOptimalPacking(allBlocks);
+                
+                if (solution) {
+                    const { dims, ratio, finalGrid, frames } = solution;
+                    statusMessage.textContent = 'Solution found!';
+                    outputInfo.innerHTML = `
+                        <div class="text-lg font-semibold space-y-2">
+                            <p>Dimensions: ${dims.h} x ${dims.w}</p>
+                            <p>Aspect Ratio: ${ratio}</p>
+                            <p>Total Steps: ${frames.length}</p>
+                        </div>
+                    `;
+                    
+                    downloadCsvBtn.classList.remove('hidden');
+                    downloadCsvBtn.onclick = () => {
+                        const csvContent = generateCSV(finalGrid);
+                        const blob = new Blob([csvContent], { type: 'text/csv' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'solution.csv';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    };
+
+                    const numBlocks = allBlocks.length;
+                    const colorPalette = new Array(numBlocks).fill(0).map((_, i) => {
+                        const hue = (i * 137.5) % 360;
+                        return `hsl(${hue}, 70%, 50%)`;
+                    });
+                    const blockColors = ['#ffffff', ...colorPalette];
+                    
+                    canvas.width = 400;
+                    canvas.height = 400;
+                    startAnimation(frames, dims, blockColors);
+                } else {
+                    statusMessage.textContent = 'No solution found for any dimension.';
+                    outputInfo.innerHTML = '';
+                }
+            });
+
+            document.getElementById('speed-slider').addEventListener('input', (e) => {
+                animationSpeed = 1000 - parseInt(e.target.value);
+            });
+
+            document.querySelectorAll('input[name="shape-choice"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    document.getElementById('predefined-input').classList.toggle('hidden', e.target.value !== 'predefined');
+                    document.getElementById('custom-input').classList.toggle('hidden', e.target.value !== 'custom');
+                });
+            });
+            
+            window.addEventListener('load', () => {
+                const predefinedSelect = document.getElementById('predefined-select');
+                for (const name in predefinedShapes) {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    predefinedSelect.appendChild(option);
+                }
+                updateBlockList();
+            });
+
+            window.addEventListener('resize', () => {
+                const containerWidth = document.getElementById('packing-canvas').parentElement.offsetWidth;
+                canvas.width = containerWidth;
+                canvas.height = containerWidth;
+            });
+
+        </script>
+    </body>
+    </html>
